@@ -4,6 +4,8 @@ set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+export PATH="/opt/homebrew/bin:/Users/patrick/.kimi-code/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
 RUNS="${RUNS:-8}"
 MARKET_CANDIDATE_LIMIT="${MARKET_CANDIDATE_LIMIT:-2}"
 KIMI_TIMEOUT_SECONDS="${KIMI_TIMEOUT_SECONDS:-120}"
@@ -59,4 +61,3 @@ if (( run >= RUNS )); then
 fi
 
 exit "$exit_code"
-
