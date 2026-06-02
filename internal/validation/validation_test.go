@@ -65,6 +65,23 @@ func TestValidateProposalRejectsUnknownToken(t *testing.T) {
 	}
 }
 
+func TestValidateProposalRejectsUnsupportedGTC(t *testing.T) {
+	cfg := config.Load()
+	p := validProposal()
+	p.NewOpportunities[0].Order.OrderType = "GTC"
+	candidates := []types.MarketCandidate{{
+		EventSlug:     "ev",
+		MarketSlug:    "m",
+		Outcomes:      []string{"Yes", "No"},
+		OutcomePrices: []float64{0.55, 0.45},
+		TokenIDs:      []string{"tok_yes", "tok_no"},
+	}}
+	result := ValidateProposal(p, cfg, candidates, portfolio.NewPaperPortfolio("cy", 500))
+	if result.Passed || !hasCode(result.Errors, "unsupported_gtc") {
+		t.Fatalf("expected unsupported GTC failure, got %#v", result.Errors)
+	}
+}
+
 func validProposal() types.Proposal {
 	return types.Proposal{
 		SchemaVersion: "1",
