@@ -44,7 +44,7 @@ func RunPaperCycle(ctx context.Context, cfg config.Config, agent Agent) (CycleRe
 	contextPayload := map[string]any{
 		"cycle_id":          cycleID,
 		"portfolio":         current,
-		"market_candidates": candidates,
+		"market_candidates": compactCandidates(candidates),
 	}
 
 	var proposal types.Proposal
@@ -179,8 +179,9 @@ func readBooksForProposal(ctx context.Context, client marketdata.Client, proposa
 func buildPrompt(contextPayload map[string]any, errors []types.ValidationError) string {
 	contextJSON, _ := json.MarshalIndent(contextPayload, "", "  ")
 	var b strings.Builder
-	b.WriteString("You are producing a JSON-only research proposal for a local paper simulation. No real money, live orders, wallet calls, or trading API calls will be used.\n")
+	b.WriteString("You are producing a JSON-only validation input for a local paper simulation. No real money, live orders, wallet calls, or trading API calls will be used.\n")
 	b.WriteString("Return only a single valid JSON object. No markdown. No commentary. No code fence.\n")
+	b.WriteString("Do not use tools. Use only the context below. If context is insufficient for a trade-ready open or position action, output empty arrays.\n")
 	b.WriteString("MVP supports only FOK-style paper execution; do not output GTC or GTD.\n")
 	b.WriteString("Every open item needs resolution, evidence, counter_evidence, probabilities, edge, and order intent.\n")
 	b.WriteString("Schema fields: schema_version, cycle_id, created_at, position_reviews, new_opportunities.\n")
@@ -194,4 +195,32 @@ func buildPrompt(contextPayload map[string]any, errors []types.ValidationError) 
 	b.WriteString("\nContext:\n")
 	b.Write(contextJSON)
 	return b.String()
+}
+
+func compactCandidates(candidates []types.MarketCandidate) []map[string]any {
+	out := make([]map[string]any, 0, len(candidates))
+	for _, c := range candidates {
+		out = append(out, map[string]any{
+			"event_slug":     c.EventSlug,
+			"market_slug":    c.MarketSlug,
+			"question":       c.Question,
+			"outcomes":       c.Outcomes,
+			"outcome_prices": c.OutcomePrices,
+			"token_ids":      c.TokenIDs,
+			"liquidity_usd":  c.LiquidityUSD,
+			"resolution": map[string]any{
+				"source_url":   c.Resolution.SourceURL,
+				"rule_excerpt": truncate(c.Resolution.RuleExcerpt, 600),
+				"time_window":  c.Resolution.TimeWindow,
+			},
+		})
+	}
+	return out
+}
+
+func truncate(value string, max int) string {
+	if len(value) <= max {
+		return value
+	}
+	return value[:max]
 }
