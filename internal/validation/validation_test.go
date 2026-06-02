@@ -82,6 +82,31 @@ func TestValidateProposalRejectsUnsupportedGTC(t *testing.T) {
 	}
 }
 
+func TestValidateProposalRejectsUnsupportedRedeem(t *testing.T) {
+	cfg := config.Load()
+	p := types.Proposal{
+		SchemaVersion: "1",
+		CycleID:       "cy",
+		CreatedAt:     "now",
+		PositionReviews: []types.PositionReview{{
+			DecisionID:        "r1",
+			PositionID:        "p1",
+			EventSlug:         "ev",
+			MarketSlug:        "m",
+			TokenID:           "tok_yes",
+			Outcome:           "Yes",
+			Action:            "redeem",
+			AIProbability:     1,
+			MarketProbability: 1,
+			Edge:              0,
+		}},
+	}
+	result := ValidateProposal(p, cfg, nil, portfolio.NewPaperPortfolio("cy", 500))
+	if result.Passed || !hasCode(result.Errors, "unsupported_redeem") {
+		t.Fatalf("expected unsupported redeem failure, got %#v", result.Errors)
+	}
+}
+
 func validProposal() types.Proposal {
 	return types.Proposal{
 		SchemaVersion: "1",

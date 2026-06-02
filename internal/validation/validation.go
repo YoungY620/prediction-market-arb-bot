@@ -94,6 +94,9 @@ func validateDecisionBasics(path, id, marketSlug, tokenID, outcome, action strin
 	if !oneOf(action, "open", "watchlist", "skip", "hold", "reduce", "close", "redeem", "needs_review") {
 		errors = append(errors, err("schema_gate", "invalid_action", path+".action", "action is not supported"))
 	}
+	if action == "redeem" {
+		errors = append(errors, err("execution_preview_gate", "unsupported_redeem", path+".action", "MVP does not support redeem execution"))
+	}
 	if aiProb < 0 || aiProb > 1 {
 		errors = append(errors, err("schema_gate", "invalid_ai_probability", path+".ai_probability", "ai_probability must be in [0,1]"))
 	}
