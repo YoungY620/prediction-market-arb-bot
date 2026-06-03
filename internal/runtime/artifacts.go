@@ -20,6 +20,24 @@ func writeJSON(path string, value any) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
+func appendJSONLine(path string, value any) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.Marshal(normalizeJSONValue(value))
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = file.Write(data)
+	return err
+}
+
 func normalizeJSONValue(value any) any {
 	switch v := value.(type) {
 	case types.ValidationResult:

@@ -107,6 +107,47 @@ func TestValidateProposalRejectsUnsupportedRedeem(t *testing.T) {
 	}
 }
 
+func TestValidateProposalRequiresNoTradeReasonForEmptyDecision(t *testing.T) {
+	cfg := config.Load()
+	p := types.Proposal{SchemaVersion: "1", CycleID: "cy", CreatedAt: "now"}
+	result := ValidateProposal(p, cfg, nil, portfolio.NewPaperPortfolio("cy", 500))
+	if result.Passed || !hasCode(result.Errors, "missing_no_trade_reason") {
+		t.Fatalf("expected missing no_trade reason failure, got %#v", result.Errors)
+	}
+
+	p.NoTrade = &types.NoTradeReason{
+		Reason:              "no candidate has sufficient evidence and positive edge",
+		CandidateCount:      0,
+		CheckedMarketSlugs:  []string{},
+		MissingRequirements: []string{"external evidence", "counter evidence"},
+		DataHealth:          []string{"gamma markets available", "no order book needed because no token was proposed"},
+	}
+	result = ValidateProposal(p, cfg, nil, portfolio.NewPaperPortfolio("cy", 500))
+	if !result.Passed {
+		t.Fatalf("expected structured no_trade to pass, got %#v", result.Errors)
+	}
+}
+
+func TestValidateProposalRejectsNoTradeCandidateCountMismatch(t *testing.T) {
+	cfg := config.Load()
+	p := types.Proposal{
+		SchemaVersion: "1",
+		CycleID:       "cy",
+		CreatedAt:     "now",
+		NoTrade: &types.NoTradeReason{
+			Reason:              "no edge",
+			CandidateCount:      0,
+			CheckedMarketSlugs:  []string{"m"},
+			MissingRequirements: []string{"edge"},
+			DataHealth:          []string{"ok"},
+		},
+	}
+	result := ValidateProposal(p, cfg, []types.MarketCandidate{{MarketSlug: "m"}}, portfolio.NewPaperPortfolio("cy", 500))
+	if result.Passed || !hasCode(result.Errors, "candidate_count_mismatch") {
+		t.Fatalf("expected candidate_count_mismatch, got %#v", result.Errors)
+	}
+}
+
 func validProposal() types.Proposal {
 	return types.Proposal{
 		SchemaVersion: "1",

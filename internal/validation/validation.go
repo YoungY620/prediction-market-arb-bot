@@ -28,6 +28,7 @@ func ValidateProposal(proposal types.Proposal, cfg config.Config, candidates []t
 	result := types.ValidationResult{CycleID: proposal.CycleID, Passed: true}
 	result.Errors = append(result.Errors, schemaGate(proposal)...)
 	result.Errors = append(result.Errors, researchFieldGate(proposal)...)
+	result.Errors = append(result.Errors, noTradeGate(proposal, candidates)...)
 	result.Errors = append(result.Errors, marketBindingGate(proposal, cfg, candidates)...)
 	result.Errors = append(result.Errors, probabilityEdgeGate(proposal, cfg)...)
 	result.Errors = append(result.Errors, portfolioRiskGate(proposal, cfg, portfolio)...)
@@ -35,6 +36,20 @@ func ValidateProposal(proposal types.Proposal, cfg config.Config, candidates []t
 		result.Passed = false
 	}
 	return result
+}
+
+func noTradeGate(p types.Proposal, candidates []types.MarketCandidate) []types.ValidationError {
+	if len(p.PositionReviews) > 0 || len(p.NewOpportunities) > 0 || p.NoTrade == nil {
+		return nil
+	}
+	var errors []types.ValidationError
+	if p.NoTrade.CandidateCount != len(candidates) {
+		errors = append(errors, err("no_trade_gate", "candidate_count_mismatch", "$.no_trade.candidate_count", "no_trade.candidate_count must match current candidate count"))
+	}
+	if len(candidates) > 0 && len(p.NoTrade.CheckedMarketSlugs) == 0 {
+		errors = append(errors, err("no_trade_gate", "missing_checked_markets", "$.no_trade.checked_market_slugs", "no_trade.checked_market_slugs must list checked candidates when candidates exist"))
+	}
+	return errors
 }
 
 func schemaGate(p types.Proposal) []types.ValidationError {
@@ -47,6 +62,24 @@ func schemaGate(p types.Proposal) []types.ValidationError {
 	}
 	if p.CreatedAt == "" {
 		errors = append(errors, err("schema_gate", "missing_created_at", "$.created_at", "created_at is required"))
+	}
+	if len(p.PositionReviews) == 0 && len(p.NewOpportunities) == 0 {
+		if p.NoTrade == nil {
+			errors = append(errors, err("schema_gate", "missing_no_trade_reason", "$.no_trade", "empty proposal requires structured no_trade reason"))
+		} else {
+			if placeholder(p.NoTrade.Reason) {
+				errors = append(errors, err("schema_gate", "missing_no_trade_reason_text", "$.no_trade.reason", "no_trade.reason is required"))
+			}
+			if p.NoTrade.CandidateCount < 0 {
+				errors = append(errors, err("schema_gate", "invalid_no_trade_candidate_count", "$.no_trade.candidate_count", "candidate_count cannot be negative"))
+			}
+			if len(p.NoTrade.DataHealth) == 0 {
+				errors = append(errors, err("schema_gate", "missing_no_trade_data_health", "$.no_trade.data_health", "no_trade.data_health must describe data availability"))
+			}
+			if len(p.NoTrade.MissingRequirements) == 0 {
+				errors = append(errors, err("schema_gate", "missing_no_trade_requirements", "$.no_trade.missing_requirements", "no_trade.missing_requirements must explain why no item is trade-ready"))
+			}
+		}
 	}
 	ids := map[string]bool{}
 	for i, item := range p.NewOpportunities {
