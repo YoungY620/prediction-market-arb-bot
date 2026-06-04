@@ -10,6 +10,8 @@ func TestLoadDefaultsUseKimiAndFiveWorkerRepairs(t *testing.T) {
 	t.Setenv("GAMMA_REQUEST_RETRIES", "")
 	t.Setenv("DISCOVERY_PARTIAL_MIN_CANDIDATES", "")
 	t.Setenv("DISCOVERY_CACHE_ENABLED", "")
+	t.Setenv("CANDIDATE_FILTER_PRESETS", "")
+	t.Setenv("CANDIDATE_FILTER_KEYWORDS", "")
 	cfg := Load()
 	if cfg.AgentProvider != "kimi" {
 		t.Fatalf("expected kimi default provider, got %q", cfg.AgentProvider)
@@ -31,5 +33,8 @@ func TestLoadDefaultsUseKimiAndFiveWorkerRepairs(t *testing.T) {
 	}
 	if !cfg.DiscoveryCacheEnabled {
 		t.Fatal("expected discovery cache enabled by default")
+	}
+	if cfg.CandidateFilterPresets != "" || cfg.CandidateFilterKeywords != "" {
+		t.Fatalf("expected candidate filters disabled by default, got presets=%q keywords=%q", cfg.CandidateFilterPresets, cfg.CandidateFilterKeywords)
 	}
 }

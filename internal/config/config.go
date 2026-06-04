@@ -42,6 +42,8 @@ type Config struct {
 	GammaRetryBackoff                 time.Duration
 	DiscoveryPartialMinCandidates     int
 	DiscoveryCacheEnabled             bool
+	CandidateFilterPresets            string
+	CandidateFilterKeywords           string
 	MinMarketLiquidityUSD             float64
 	PriceTolerancePct                 float64
 	StrategyClipMinRatio              float64
@@ -98,6 +100,8 @@ func Load() Config {
 		GammaRetryBackoff:                 time.Duration(envInt("GAMMA_RETRY_BACKOFF_MS", 500)) * time.Millisecond,
 		DiscoveryPartialMinCandidates:     envInt("DISCOVERY_PARTIAL_MIN_CANDIDATES", 500),
 		DiscoveryCacheEnabled:             envBool("DISCOVERY_CACHE_ENABLED", true),
+		CandidateFilterPresets:            envString("CANDIDATE_FILTER_PRESETS", ""),
+		CandidateFilterKeywords:           envString("CANDIDATE_FILTER_KEYWORDS", ""),
 		MinMarketLiquidityUSD:             envFloat("MIN_MARKET_LIQUIDITY_USD", 5000),
 		PriceTolerancePct:                 envFloat("PRICE_TOLERANCE_PCT", 0.03),
 		StrategyClipMinRatio:              envFloat("STRATEGY_CLIP_MIN_RATIO", 0.5),

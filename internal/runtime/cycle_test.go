@@ -392,9 +392,9 @@ func TestCoordinatorPrescreenKeepsBroadCoverage(t *testing.T) {
 	}
 }
 
-func TestKimiProviderFiltersChinaPoliticsCandidates(t *testing.T) {
+func TestConfiguredPresetFiltersChinaPoliticsCandidates(t *testing.T) {
 	cfg := config.Load()
-	cfg.AgentProvider = "kimi"
+	cfg.CandidateFilterPresets = "china_politics"
 	candidates := []types.MarketCandidate{
 		researchRuntimeCandidate("ev1", "safe-sports"),
 		{
@@ -414,10 +414,10 @@ func TestKimiProviderFiltersChinaPoliticsCandidates(t *testing.T) {
 		researchRuntimeCandidate("ev4", "safe-election"),
 	}
 
-	filtered, removed := filterCandidatesForAgentProvider(candidates, cfg)
+	filtered, report := filterCandidatesForConfiguredRules(candidates, cfg)
 
-	if removed != 2 {
-		t.Fatalf("expected 2 China politics candidates removed, got %d: %#v", removed, filtered)
+	if report.RemovedCount != 2 || !report.Enabled || report.KeywordCount == 0 {
+		t.Fatalf("expected 2 China politics candidates removed, got report=%#v filtered=%#v", report, filtered)
 	}
 	if len(filtered) != 2 {
 		t.Fatalf("expected 2 candidates left, got %#v", filtered)
@@ -429,9 +429,9 @@ func TestKimiProviderFiltersChinaPoliticsCandidates(t *testing.T) {
 	}
 }
 
-func TestNonKimiProviderDoesNotFilterChinaPoliticsCandidates(t *testing.T) {
+func TestDefaultCandidateFilterDoesNotFilterByProvider(t *testing.T) {
 	cfg := config.Load()
-	cfg.AgentProvider = "codex"
+	cfg.AgentProvider = "kimi"
 	candidates := []types.MarketCandidate{
 		researchRuntimeCandidate("ev1", "safe-sports"),
 		{
@@ -443,13 +443,32 @@ func TestNonKimiProviderDoesNotFilterChinaPoliticsCandidates(t *testing.T) {
 		},
 	}
 
-	filtered, removed := filterCandidatesForAgentProvider(candidates, cfg)
+	filtered, report := filterCandidatesForConfiguredRules(candidates, cfg)
 
-	if removed != 0 {
-		t.Fatalf("expected no non-Kimi filtering, got removed=%d", removed)
+	if report.RemovedCount != 0 || report.Enabled {
+		t.Fatalf("expected no implicit provider filtering, got report=%#v", report)
 	}
 	if len(filtered) != len(candidates) {
-		t.Fatalf("expected non-Kimi provider to keep candidates, got %#v", filtered)
+		t.Fatalf("expected default filter to keep candidates, got %#v", filtered)
+	}
+}
+
+func TestCustomCandidateFilterKeywords(t *testing.T) {
+	cfg := config.Load()
+	cfg.CandidateFilterKeywords = "quadra kill, governor"
+	candidates := []types.MarketCandidate{
+		researchRuntimeCandidate("ev1", "safe-sports"),
+		{EventSlug: "esports", MarketSlug: "lol-quadra", Question: "Game 3: Any Player Quadra Kill?"},
+		{EventSlug: "election", MarketSlug: "ca-governor", Question: "Will someone win the California Governor election?"},
+	}
+
+	filtered, report := filterCandidatesForConfiguredRules(candidates, cfg)
+
+	if report.RemovedCount != 2 || report.KeywordCount != 2 {
+		t.Fatalf("expected custom keywords to remove 2 candidates, got report=%#v filtered=%#v", report, filtered)
+	}
+	if len(filtered) != 1 || filtered[0].MarketSlug != "safe-sports" {
+		t.Fatalf("expected only safe-sports left, got %#v", filtered)
 	}
 }
 

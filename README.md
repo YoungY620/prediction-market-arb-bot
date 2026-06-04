@@ -89,6 +89,14 @@ for trading so a single deep Gamma offset cannot invalidate the whole soak;
 `SMOKE_MAX_CANDIDATES_PER_CYCLE` is default-off and should only be set for
 bounded real-agent smoke runs; when set, `market-data-health.json` records the
 full discovered candidate count and the truncated execution candidate count.
+Candidate content filters are explicit, not provider-implied. Set
+`CANDIDATE_FILTER_PRESETS=china_politics` to remove markets whose slug, question,
+event title, category, tags, or resolution text match the built-in China
+politics keyword set. Add comma-separated custom filters with
+`CANDIDATE_FILTER_KEYWORDS`, for example
+`CANDIDATE_FILTER_KEYWORDS=quadra kill,governor`. When filters run,
+`market-data-health.json` records `candidate_filter.enabled`, `presets`,
+`keyword_count`, and `removed_count`.
 The coordinator pre-screen writes `coordinator-prescreen.json` before planning.
 It is a broad-coverage noise gate, not a tiny Top-N funnel: by default
 `COORDINATOR_PRESCREEN_MAX_CANDIDATES=0` keeps all executable candidates and
