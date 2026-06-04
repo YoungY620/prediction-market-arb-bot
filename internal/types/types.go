@@ -155,6 +155,9 @@ type DiscoveryReport struct {
 	FilteredMarketCount  int                   `json:"filtered_market_count"`
 	FilteredByReason     map[string]int        `json:"filtered_by_reason"`
 	DuplicateMarketCount int                   `json:"duplicate_market_count"`
+	Partial              bool                  `json:"partial,omitempty"`
+	CacheHit             bool                  `json:"cache_hit,omitempty"`
+	Warnings             []string              `json:"warnings,omitempty"`
 }
 
 type DiscoverySortReport struct {

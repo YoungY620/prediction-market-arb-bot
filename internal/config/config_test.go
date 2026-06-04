@@ -7,6 +7,9 @@ func TestLoadDefaultsUseKimiAndFiveWorkerRepairs(t *testing.T) {
 	t.Setenv("WORKER_REPAIR_ATTEMPTS", "")
 	t.Setenv("COORDINATOR_PRESCREEN_MAX_CANDIDATES", "")
 	t.Setenv("COORDINATOR_PRESCREEN_MIN_CANDIDATES", "")
+	t.Setenv("GAMMA_REQUEST_RETRIES", "")
+	t.Setenv("DISCOVERY_PARTIAL_MIN_CANDIDATES", "")
+	t.Setenv("DISCOVERY_CACHE_ENABLED", "")
 	cfg := Load()
 	if cfg.AgentProvider != "kimi" {
 		t.Fatalf("expected kimi default provider, got %q", cfg.AgentProvider)
@@ -19,5 +22,14 @@ func TestLoadDefaultsUseKimiAndFiveWorkerRepairs(t *testing.T) {
 	}
 	if cfg.CoordinatorPreScreenMinCandidates != 24 {
 		t.Fatalf("expected broad coordinator prescreen floor of 24, got %d", cfg.CoordinatorPreScreenMinCandidates)
+	}
+	if cfg.GammaRequestRetries != 3 {
+		t.Fatalf("expected 3 gamma request retries, got %d", cfg.GammaRequestRetries)
+	}
+	if cfg.DiscoveryPartialMinCandidates != 500 {
+		t.Fatalf("expected partial discovery floor of 500, got %d", cfg.DiscoveryPartialMinCandidates)
+	}
+	if !cfg.DiscoveryCacheEnabled {
+		t.Fatal("expected discovery cache enabled by default")
 	}
 }

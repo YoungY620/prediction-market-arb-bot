@@ -38,6 +38,10 @@ type Config struct {
 
 	EventPagesPerSort                 int
 	EventsPerPage                     int
+	GammaRequestRetries               int
+	GammaRetryBackoff                 time.Duration
+	DiscoveryPartialMinCandidates     int
+	DiscoveryCacheEnabled             bool
 	MinMarketLiquidityUSD             float64
 	PriceTolerancePct                 float64
 	StrategyClipMinRatio              float64
@@ -90,6 +94,10 @@ func Load() Config {
 
 		EventPagesPerSort:                 envInt("EVENT_PAGES_PER_SORT", 0),
 		EventsPerPage:                     envInt("EVENTS_PER_PAGE", 50),
+		GammaRequestRetries:               envInt("GAMMA_REQUEST_RETRIES", 3),
+		GammaRetryBackoff:                 time.Duration(envInt("GAMMA_RETRY_BACKOFF_MS", 500)) * time.Millisecond,
+		DiscoveryPartialMinCandidates:     envInt("DISCOVERY_PARTIAL_MIN_CANDIDATES", 500),
+		DiscoveryCacheEnabled:             envBool("DISCOVERY_CACHE_ENABLED", true),
 		MinMarketLiquidityUSD:             envFloat("MIN_MARKET_LIQUIDITY_USD", 5000),
 		PriceTolerancePct:                 envFloat("PRICE_TOLERANCE_PCT", 0.03),
 		StrategyClipMinRatio:              envFloat("STRATEGY_CLIP_MIN_RATIO", 0.5),

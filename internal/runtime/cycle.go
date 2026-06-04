@@ -67,10 +67,11 @@ func RunPaperCycle(ctx context.Context, cfg config.Config, agent Agent) (CycleRe
 	candidates, discoveryReport, err := market.FetchCandidateSet(ctx)
 	if err != nil {
 		writeJSON(filepath.Join(cycleDir, "error.json"), map[string]any{"code": "market_data_failed", "message": err.Error(), "partial_discovery_report": discoveryReport})
-		_ = writeJSON(filepath.Join(cycleDir, "market-data-health.json"), marketDataHealth(candidates, discoveryReport, cfg, len(candidates)))
+		_ = writeJSON(filepath.Join(cycleDir, "market-data-health.json"), marketDataHealth(candidates, discoveryReport, cfg, len(candidates), 0))
 		return CycleResult{}, err
 	}
 	discoveredCandidateCount := len(candidates)
+	candidates, providerFilteredCandidateCount := filterCandidatesForAgentProvider(candidates, cfg)
 	candidates = limitCandidatesForSmoke(candidates, cfg)
 	preScreenedCandidates, preScreenReport := preScreenCoordinatorCandidates(candidates, cfg)
 	if err := writeJSON(filepath.Join(cycleDir, "coordinator-prescreen.json"), preScreenReport); err != nil {
@@ -81,7 +82,7 @@ func RunPaperCycle(ctx context.Context, cfg config.Config, agent Agent) (CycleRe
 	if err := writeJSON(candidateFile, compactCandidates(candidates)); err != nil {
 		return CycleResult{}, err
 	}
-	if err := writeJSON(filepath.Join(cycleDir, "market-data-health.json"), marketDataHealth(candidates, discoveryReport, cfg, discoveredCandidateCount)); err != nil {
+	if err := writeJSON(filepath.Join(cycleDir, "market-data-health.json"), marketDataHealth(candidates, discoveryReport, cfg, discoveredCandidateCount, providerFilteredCandidateCount)); err != nil {
 		return CycleResult{}, err
 	}
 	dataSourceHealth := checkDataSources(ctx, cfg, market, candidates)
@@ -609,6 +610,71 @@ func limitCandidatesForSmoke(candidates []types.MarketCandidate, cfg config.Conf
 	return candidates[:cfg.SmokeMaxCandidatesPerCycle]
 }
 
+func filterCandidatesForAgentProvider(candidates []types.MarketCandidate, cfg config.Config) ([]types.MarketCandidate, int) {
+	if !strings.EqualFold(cfg.AgentProvider, "kimi") {
+		return candidates, 0
+	}
+	filtered := make([]types.MarketCandidate, 0, len(candidates))
+	removed := 0
+	for _, candidate := range candidates {
+		if isChinaPoliticsCandidate(candidate) {
+			removed++
+			continue
+		}
+		filtered = append(filtered, candidate)
+	}
+	return filtered, removed
+}
+
+func isChinaPoliticsCandidate(candidate types.MarketCandidate) bool {
+	text := strings.ToLower(strings.Join([]string{
+		candidate.EventSlug,
+		candidate.EventTitle,
+		candidate.MarketSlug,
+		candidate.Question,
+		candidate.CategorySlug,
+		candidate.CategoryLabel,
+		candidate.Resolution.RuleExcerpt,
+	}, " "))
+	for _, tag := range candidate.Tags {
+		text += " " + strings.ToLower(tag.Slug) + " " + strings.ToLower(tag.Label)
+	}
+	for _, keyword := range chinaPoliticsKeywords {
+		if strings.Contains(text, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func providerFilterName(cfg config.Config) string {
+	if strings.EqualFold(cfg.AgentProvider, "kimi") {
+		return "kimi_china_politics_keywords"
+	}
+	return ""
+}
+
+var chinaPoliticsKeywords = []string{
+	"china",
+	"chinese communist party",
+	"ccp",
+	"communist party of china",
+	"beijing",
+	"taiwan",
+	"hong kong",
+	"xinjiang",
+	"tibet",
+	"xi jinping",
+	"习近平",
+	"中国",
+	"中共",
+	"台湾",
+	"台海",
+	"香港",
+	"新疆",
+	"西藏",
+}
+
 func preScreenCoordinatorCandidates(candidates []types.MarketCandidate, cfg config.Config) ([]types.MarketCandidate, coordinatorPreScreenReport) {
 	report := coordinatorPreScreenReport{
 		InputCount:    len(candidates),
@@ -928,7 +994,7 @@ func polymarketAPIGuide(cfg config.Config) map[string]any {
 	}
 }
 
-func marketDataHealth(candidates []types.MarketCandidate, report types.DiscoveryReport, cfg config.Config, discoveredCandidateCount int) map[string]any {
+func marketDataHealth(candidates []types.MarketCandidate, report types.DiscoveryReport, cfg config.Config, discoveredCandidateCount, providerFilteredCandidateCount int) map[string]any {
 	missingSourceURL := 0
 	missingRule := 0
 	missingPrices := 0
@@ -948,6 +1014,8 @@ func marketDataHealth(candidates []types.MarketCandidate, report types.Discovery
 	return map[string]any{
 		"candidate_count":                        len(candidates),
 		"discovered_candidate_count":             discoveredCandidateCount,
+		"provider_filtered_candidate_count":      providerFilteredCandidateCount,
+		"provider_filter":                        providerFilterName(cfg),
 		"smoke_candidate_limit":                  cfg.SmokeMaxCandidatesPerCycle,
 		"smoke_candidate_limit_applied":          cfg.SmokeMaxCandidatesPerCycle > 0 && discoveredCandidateCount > len(candidates),
 		"total_token_count":                      totalTokens,

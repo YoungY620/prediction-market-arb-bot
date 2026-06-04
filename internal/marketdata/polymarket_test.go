@@ -2,8 +2,11 @@ package marketdata
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"prediction-market-arb-bot/internal/config"
@@ -47,6 +50,7 @@ func TestFetchCandidatesPaginatesUntilShortPage(t *testing.T) {
 	cfg.EventsPerPage = 2
 	cfg.EventPagesPerSort = 2
 	cfg.MinMarketLiquidityUSD = 5000
+	cfg.DiscoveryCacheEnabled = false
 	client := New(cfg)
 	candidates, err := client.FetchCandidates(context.Background())
 	if err != nil {
@@ -95,6 +99,7 @@ func TestFetchCandidateSetDefaultPagesUntilShortPage(t *testing.T) {
 	cfg.EventsPerPage = 1
 	cfg.EventPagesPerSort = 0
 	cfg.MinMarketLiquidityUSD = 5000
+	cfg.DiscoveryCacheEnabled = false
 	client := New(cfg)
 	candidates, report, err := client.FetchCandidateSet(context.Background())
 	if err != nil {
@@ -134,6 +139,8 @@ func TestFetchCandidateSetReturnsPartialReportOnPageFailure(t *testing.T) {
 	cfg.GammaBaseURL = server.URL
 	cfg.EventsPerPage = 1
 	cfg.EventPagesPerSort = 0
+	cfg.GammaRequestRetries = 0
+	cfg.DiscoveryCacheEnabled = false
 	client := New(cfg)
 	candidates, report, err := client.FetchCandidateSet(context.Background())
 	if err == nil {
@@ -144,6 +151,119 @@ func TestFetchCandidateSetReturnsPartialReportOnPageFailure(t *testing.T) {
 	}
 	if len(report.SortDimensions) != 1 || report.SortDimensions[0].Pages != 1 || report.SortDimensions[0].Events != 1 {
 		t.Fatalf("expected partial sort dimension progress, got %#v", report.SortDimensions)
+	}
+}
+
+func TestFetchCandidateSetContinuesWithPartialDiscoveryAfterEnoughCandidates(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/events" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Query().Get("offset") == "2" {
+			http.Error(w, "temporary gamma error", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("offset") {
+		case "0":
+			_, _ = w.Write([]byte(`[
+				{"slug":"ev1","title":"event 1","tags":[{"slug":"politics","label":"Politics"}],"markets":[
+					{"slug":"m1","question":"q1","enableOrderBook":true,"liquidityNum":10000,"volume24hr":100,"outcomes":"[\"Yes\",\"No\"]","outcomePrices":"[\"0.6\",\"0.4\"]","clobTokenIds":"[\"tok1\",\"tok2\"]"}
+				]}
+			]`))
+		default:
+			_, _ = w.Write([]byte(`[
+				{"slug":"ev2","title":"event 2","tags":[{"slug":"sports","label":"Sports"}],"markets":[
+					{"slug":"m2","question":"q2","enableOrderBook":true,"liquidityNum":10000,"volume24hr":100,"outcomes":"[\"Yes\",\"No\"]","outcomePrices":"[\"0.7\",\"0.3\"]","clobTokenIds":"[\"tok3\",\"tok4\"]"}
+				]}
+			]`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.Load()
+	cfg.GammaBaseURL = server.URL
+	cfg.RuntimeDir = t.TempDir()
+	cfg.EventsPerPage = 1
+	cfg.EventPagesPerSort = 0
+	cfg.GammaRequestRetries = 0
+	cfg.DiscoveryPartialMinCandidates = 2
+	client := New(cfg)
+	candidates, report, err := client.FetchCandidateSet(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 2 || !report.Partial || len(report.Warnings) == 0 {
+		t.Fatalf("expected partial discovery success with warnings, candidates=%d report=%#v", len(candidates), report)
+	}
+}
+
+func TestFetchCandidateSetFallsBackToDiscoveryCacheWhenLiveDiscoveryTooThin(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "temporary gamma error", http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	runtimeDir := t.TempDir()
+	cache := discoveryCache{
+		Candidates: []types.MarketCandidate{baseCandidate(func(c *types.MarketCandidate) {
+			c.MarketSlug = "cached-market"
+		})},
+		Report: types.DiscoveryReport{AcceptedMarketCount: 1},
+	}
+	data, err := json.Marshal(cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runtimeDir, "discovery-cache.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Load()
+	cfg.GammaBaseURL = server.URL
+	cfg.RuntimeDir = runtimeDir
+	cfg.EventsPerPage = 1
+	cfg.EventPagesPerSort = 0
+	cfg.GammaRequestRetries = 0
+	cfg.DiscoveryPartialMinCandidates = 10
+	client := New(cfg)
+	candidates, report, err := client.FetchCandidateSet(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || candidates[0].MarketSlug != "cached-market" || !report.CacheHit || !report.Partial {
+		t.Fatalf("expected cache fallback, candidates=%#v report=%#v", candidates, report)
+	}
+}
+
+func TestFetchCandidateSetRetriesTemporaryGammaFailures(t *testing.T) {
+	requests := 0
+	byOrder := map[string]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		byOrder[r.URL.Query().Get("order")]++
+		if requests == 1 {
+			http.Error(w, "temporary gamma error", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+
+	cfg := config.Load()
+	cfg.GammaBaseURL = server.URL
+	cfg.RuntimeDir = t.TempDir()
+	cfg.EventPagesPerSort = 1
+	cfg.GammaRequestRetries = 1
+	cfg.GammaRetryBackoff = 0
+	client := New(cfg)
+	if _, _, err := client.FetchCandidateSet(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if requests != len(eventSortDimensions)+1 || byOrder[eventSortDimensions[0]] != 2 {
+		t.Fatalf("expected one retry on first sort, requests=%d byOrder=%#v", requests, byOrder)
 	}
 }
 
@@ -160,6 +280,7 @@ func TestFetchCandidatesCapsEventsPageSizeAtGammaLimit(t *testing.T) {
 	cfg.GammaBaseURL = server.URL
 	cfg.EventsPerPage = 500
 	cfg.EventPagesPerSort = 1
+	cfg.DiscoveryCacheEnabled = false
 	client := New(cfg)
 	if _, err := client.FetchCandidates(context.Background()); err != nil {
 		t.Fatal(err)

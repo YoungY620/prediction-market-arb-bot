@@ -7,6 +7,8 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -20,6 +22,21 @@ import (
 type Client struct {
 	cfg  config.Config
 	http *http.Client
+}
+
+type discoveryCache struct {
+	SavedAt    string                  `json:"saved_at"`
+	Candidates []types.MarketCandidate `json:"candidates"`
+	Report     types.DiscoveryReport   `json:"report"`
+}
+
+type gammaHTTPError struct {
+	statusCode int
+	status     string
+}
+
+func (e gammaHTTPError) Error() string {
+	return "gamma events returned " + e.status
 }
 
 var eventSortDimensions = []string{"volume24hr", "liquidity", "startDate", "competitive"}
@@ -120,7 +137,21 @@ func (c Client) FetchCandidateSet(ctx context.Context) ([]types.MarketCandidate,
 			if err != nil {
 				report.AcceptedMarketCount = len(out)
 				report.AcceptedEventCount = len(acceptedEvents)
+				report.Partial = true
+				report.Warnings = append(report.Warnings, fmt.Sprintf("partial_discovery_page_failed order=%s offset=%d error=%s", dimension, page*pageSize, err.Error()))
 				report.SortDimensions = append(report.SortDimensions, sortReport)
+				if c.partialDiscoveryIsEnough(out) {
+					c.sortCandidates(out)
+					_ = c.writeDiscoveryCache(out, report)
+					return out, report, nil
+				}
+				if cachedCandidates, cachedReport, cacheErr := c.readDiscoveryCache(); cacheErr == nil && len(cachedCandidates) > 0 {
+					cachedReport.Partial = true
+					cachedReport.CacheHit = true
+					cachedReport.Warnings = append(cachedReport.Warnings, fmt.Sprintf("live_discovery_failed_using_cache error=%s", err.Error()))
+					c.sortCandidates(cachedCandidates)
+					return cachedCandidates, cachedReport, nil
+				}
 				return out, report, err
 			}
 			sortReport.Pages++
@@ -156,18 +187,49 @@ func (c Client) FetchCandidateSet(ctx context.Context) ([]types.MarketCandidate,
 				sortReport.ShortPage = true
 				break
 			}
+			partialReport := report
+			partialReport.AcceptedMarketCount = len(out)
+			partialReport.AcceptedEventCount = len(acceptedEvents)
+			partialReport.SortDimensions = append(append([]types.DiscoverySortReport{}, report.SortDimensions...), sortReport)
+			_ = c.writeDiscoveryCache(out, partialReport)
 		}
 		report.SortDimensions = append(report.SortDimensions, sortReport)
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		return out[i].Score > out[j].Score
-	})
+	c.sortCandidates(out)
 	report.AcceptedMarketCount = len(out)
 	report.AcceptedEventCount = len(acceptedEvents)
+	_ = c.writeDiscoveryCache(out, report)
 	return out, report, nil
 }
 
 func (c Client) fetchEventsPage(ctx context.Context, limit, offset int, order string) ([]map[string]any, error) {
+	retries := c.cfg.GammaRequestRetries
+	if retries < 0 {
+		retries = 0
+	}
+	var lastErr error
+	for attempt := 0; attempt <= retries; attempt++ {
+		raw, err := c.fetchEventsPageOnce(ctx, limit, offset, order)
+		if err == nil {
+			return raw, nil
+		}
+		lastErr = err
+		if attempt == retries || !retryableGammaError(err) || ctx.Err() != nil {
+			break
+		}
+		if c.cfg.GammaRetryBackoff > 0 {
+			delay := c.cfg.GammaRetryBackoff * time.Duration(1<<attempt)
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+	}
+	return nil, lastErr
+}
+
+func (c Client) fetchEventsPageOnce(ctx context.Context, limit, offset int, order string) ([]map[string]any, error) {
 	u, err := url.Parse(c.cfg.GammaBaseURL + "/events")
 	if err != nil {
 		return nil, err
@@ -190,13 +252,77 @@ func (c Client) fetchEventsPage(ctx context.Context, limit, offset int, order st
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("gamma events returned %s", resp.Status)
+		return nil, gammaHTTPError{statusCode: resp.StatusCode, status: resp.Status}
 	}
 	var raw []map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return nil, err
 	}
 	return raw, nil
+}
+
+func retryableGammaError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if httpErr, ok := err.(gammaHTTPError); ok {
+		return httpErr.statusCode == http.StatusTooManyRequests || httpErr.statusCode >= 500
+	}
+	return true
+}
+
+func (c Client) partialDiscoveryIsEnough(candidates []types.MarketCandidate) bool {
+	minCandidates := c.cfg.DiscoveryPartialMinCandidates
+	if minCandidates <= 0 {
+		return len(candidates) > 0
+	}
+	return len(candidates) >= minCandidates
+}
+
+func (c Client) sortCandidates(candidates []types.MarketCandidate) {
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return candidates[i].Score > candidates[j].Score
+	})
+}
+
+func (c Client) discoveryCachePath() string {
+	return filepath.Join(c.cfg.RuntimeDir, "discovery-cache.json")
+}
+
+func (c Client) writeDiscoveryCache(candidates []types.MarketCandidate, report types.DiscoveryReport) error {
+	if !c.cfg.DiscoveryCacheEnabled || c.cfg.RuntimeDir == "" || len(candidates) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(c.cfg.RuntimeDir, 0o755); err != nil {
+		return err
+	}
+	items := append([]types.MarketCandidate(nil), candidates...)
+	c.sortCandidates(items)
+	payload := discoveryCache{
+		SavedAt:    time.Now().UTC().Format(time.RFC3339),
+		Candidates: items,
+		Report:     report,
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(c.discoveryCachePath(), data, 0o644)
+}
+
+func (c Client) readDiscoveryCache() ([]types.MarketCandidate, types.DiscoveryReport, error) {
+	if !c.cfg.DiscoveryCacheEnabled || c.cfg.RuntimeDir == "" {
+		return nil, types.DiscoveryReport{}, os.ErrNotExist
+	}
+	data, err := os.ReadFile(c.discoveryCachePath())
+	if err != nil {
+		return nil, types.DiscoveryReport{}, err
+	}
+	var payload discoveryCache
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, types.DiscoveryReport{}, err
+	}
+	return payload.Candidates, payload.Report, nil
 }
 
 func extractEventMarkets(event map[string]any) []map[string]any {

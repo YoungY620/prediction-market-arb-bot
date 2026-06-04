@@ -170,7 +170,7 @@ func discoveryCheck(candidates []types.MarketCandidate, raw map[string]any, preS
 	if report.AcceptedEventCount <= 0 && len(candidates) > 0 {
 		details = append(details, "accepted_event_count must be positive when candidates exist")
 	}
-	if len(report.SortDimensions) < 4 {
+	if len(report.SortDimensions) < 4 && !report.Partial && !report.CacheHit {
 		details = append(details, "all four sort dimensions must be attempted")
 	}
 	if len(report.FilteredByReason) == 0 {

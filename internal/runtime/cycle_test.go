@@ -392,6 +392,67 @@ func TestCoordinatorPrescreenKeepsBroadCoverage(t *testing.T) {
 	}
 }
 
+func TestKimiProviderFiltersChinaPoliticsCandidates(t *testing.T) {
+	cfg := config.Load()
+	cfg.AgentProvider = "kimi"
+	candidates := []types.MarketCandidate{
+		researchRuntimeCandidate("ev1", "safe-sports"),
+		{
+			EventSlug:  "china-taiwan",
+			EventTitle: "China and Taiwan",
+			MarketSlug: "will-china-invade-taiwan-before-2027",
+			Question:   "Will China invade Taiwan by end of 2026?",
+			Tags:       []types.Tag{{Slug: "china", Label: "China"}, {Slug: "geopolitics", Label: "Geopolitics"}},
+		},
+		{
+			EventSlug:  "leadership",
+			EventTitle: "Leadership",
+			MarketSlug: "xi-jinping-out-before-2027",
+			Question:   "Xi Jinping out before 2027?",
+			Tags:       []types.Tag{{Slug: "world", Label: "World"}},
+		},
+		researchRuntimeCandidate("ev4", "safe-election"),
+	}
+
+	filtered, removed := filterCandidatesForAgentProvider(candidates, cfg)
+
+	if removed != 2 {
+		t.Fatalf("expected 2 China politics candidates removed, got %d: %#v", removed, filtered)
+	}
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 candidates left, got %#v", filtered)
+	}
+	for _, candidate := range filtered {
+		if strings.Contains(candidate.MarketSlug, "china") || strings.Contains(candidate.MarketSlug, "xi-jinping") {
+			t.Fatalf("China politics candidate leaked through Kimi filter: %#v", candidate)
+		}
+	}
+}
+
+func TestNonKimiProviderDoesNotFilterChinaPoliticsCandidates(t *testing.T) {
+	cfg := config.Load()
+	cfg.AgentProvider = "codex"
+	candidates := []types.MarketCandidate{
+		researchRuntimeCandidate("ev1", "safe-sports"),
+		{
+			EventSlug:  "china-taiwan",
+			EventTitle: "China and Taiwan",
+			MarketSlug: "will-china-invade-taiwan-before-2027",
+			Question:   "Will China invade Taiwan by end of 2026?",
+			Tags:       []types.Tag{{Slug: "china", Label: "China"}},
+		},
+	}
+
+	filtered, removed := filterCandidatesForAgentProvider(candidates, cfg)
+
+	if removed != 0 {
+		t.Fatalf("expected no non-Kimi filtering, got removed=%d", removed)
+	}
+	if len(filtered) != len(candidates) {
+		t.Fatalf("expected non-Kimi provider to keep candidates, got %#v", filtered)
+	}
+}
+
 func TestReducerResumesSessionForValidationRepair(t *testing.T) {
 	cycleDir := t.TempDir()
 	cfg := config.Load()

@@ -76,6 +76,16 @@ go run ./cmd/discovery-health > runtime/smoke/discovery-health.json
 times out, the command still writes partial JSON with the candidates and page
 progress collected before failure. `EVENT_PAGES_PER_SORT=2` can be used for a
 fast API smoke; the production default `0` means paginate until short page.
+Gamma event-page reads retry transient failures (`GAMMA_REQUEST_RETRIES`,
+`GAMMA_RETRY_BACKOFF_MS`). During full discovery, if a later Gamma page still
+fails after retries but at least `DISCOVERY_PARTIAL_MIN_CANDIDATES` executable
+candidates have already been found, the cycle continues with `partial=true` and
+a warning in `discovery_report`. Discovery checkpoints are written to
+`$RUNTIME_DIR/discovery-cache.json` when `DISCOVERY_CACHE_ENABLED=true`; if a
+fresh run fails before enough candidates are found, the last cache can be used
+with `cache_hit=true`. Non-strict cycle audits accept partial/cache discovery
+for trading so a single deep Gamma offset cannot invalidate the whole soak;
+`--strict` still requires every sort dimension to reach a short page.
 `SMOKE_MAX_CANDIDATES_PER_CYCLE` is default-off and should only be set for
 bounded real-agent smoke runs; when set, `market-data-health.json` records the
 full discovered candidate count and the truncated execution candidate count.
